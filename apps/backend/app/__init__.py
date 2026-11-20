@@ -1,0 +1,1 @@
+"""MIRAGE backend application package."""

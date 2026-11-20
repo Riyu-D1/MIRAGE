@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* MIRAGE obsidian tokens — mirror tailwind.config.ts + docs/DESIGN_SYSTEM.md */
+:root {
+  --bg-obsidian: #07080c;
+  --bg-panel: #0d0f16;
+  --bg-elevated: #141824;
+  --line: #232a3d;
+  --ink-primary: #edeff5;
+  --ink-secondary: #9aa3b8;
+  --accent-cyan: #37e0d8;
+  --accent-violet: #8b7cf6;
+  --accent-crimson: #ff3b5c;
+  --accent-amber: #ffb224;
+  --accent-green: #2fd67a;
+  --heatmap-glow: #ff7a18;
+}
+
+html,
+body {
+  background: var(--bg-obsidian);
+  color: var(--ink-primary);
+}
+
+/* Subtle ops-console grid backdrop */
+body {
+  background-image:
+    linear-gradient(rgba(35, 42, 61, 0.28) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(35, 42, 61, 0.28) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
