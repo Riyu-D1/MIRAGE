@@ -14,6 +14,7 @@ import SleeperTimeline from "@/components/SleeperTimeline";
 import StageQrModal from "@/components/StageQrModal";
 import ThreeLensStage from "@/components/ThreeLensStage";
 import TopCommandBar from "@/components/TopCommandBar";
+import WipeSlider from "@/components/WipeSlider";
 import {
   createScan,
   getHealth,
@@ -64,6 +65,11 @@ export default function MissionControl() {
       <div className="grid flex-1 grid-cols-1 gap-3 p-3 xl:grid-cols-[1fr_320px]">
         <div className="flex flex-col gap-3">
           <ThreeLensStage scan={scan} />
+          <WipeSlider
+            beforeUrl={scan?.persona_a?.screenshot_url ?? null}
+            afterUrl={scan?.persona_b?.screenshot_url ?? null}
+            heatmapUrl={scan?.divergence?.heatmap_url ?? null}
+          />
           <PaymentRailFork divergence={scan?.divergence ?? null} />
           <SleeperTimeline onCheck={onSleeper} result={sleeper} />
           <RegulatorReplayBar

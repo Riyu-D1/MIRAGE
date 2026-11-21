@@ -32,6 +32,7 @@ export default function InjectionOverlay({ screenshotUrl, findings }: InjectionO
         )}
         {findings.map((f) => {
           const { x, y, width, height, viewport_width, viewport_height } = f.bbox;
+          if (width === 0 || height === 0) return null; // ghost badges below
           return (
             <button
               key={f.id}
@@ -47,6 +48,20 @@ export default function InjectionOverlay({ screenshotUrl, findings }: InjectionO
             />
           );
         })}
+        {/* Hidden payloads render no box — show them as ghost badges */}
+        <div className="absolute bottom-1 left-1 flex flex-wrap gap-1">
+          {findings
+            .filter((f) => f.bbox.width === 0 || f.bbox.height === 0)
+            .map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setSelected(f)}
+                className="animate-pulse-box rounded border border-accent-crimson bg-obsidian/80 px-1.5 py-0.5 font-mono text-[9px] text-accent-crimson"
+              >
+                {f.channel}
+              </button>
+            ))}
+        </div>
       </div>
       {selected && (
         <aside className="w-72 rounded-lg border border-line bg-panel p-3">
