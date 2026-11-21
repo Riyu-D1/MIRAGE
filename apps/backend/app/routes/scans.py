@@ -23,7 +23,7 @@ from fastapi.responses import StreamingResponse
 from ..config import settings
 from ..core import diff_engine, injection_scanner, replay_engine
 from ..core.playwright_probe import DESKTOP_UA, capture_both_personas
-from ..integrations import osint_client
+from ..integrations import grokbot_client, osint_client
 from ..integrations.supabase_client import store
 from ..schemas import (
     AgentEvent,
@@ -42,19 +42,29 @@ _EVENT_STORE: dict[str, list[AgentEvent]] = {}
 
 
 def _event(
-    scan_id: str, step: str, status: str, detail: str, latency_ms: float | None = None
+    scan_id: str,
+    step: str,
+    status: str,
+    detail: str,
+    latency_ms: float | None = None,
+    agent: str = "mirage-backend",
 ) -> AgentEvent:
+    """Emit an AgentEvent: persist it and dispatch to the Grok Bot webhook
+    (skipped for grok-bot-originated events to avoid a webhook echo loop)."""
     ev = AgentEvent(
         id=str(uuid.uuid4()),
         scan_id=scan_id,
         timestamp=datetime.now(timezone.utc).isoformat(),
         step=step,
-        agent="mirage-backend",
+        agent=agent,
         status=status,  # type: ignore[arg-type]
         detail=detail,
         latency_ms=latency_ms,
     )
+    _EVENT_STORE.setdefault(scan_id, []).append(ev)
     store.insert_event(ev)
+    if agent == "mirage-backend":
+        grokbot_client.dispatch_event_sync(ev)
     return ev
 
 
@@ -82,34 +92,29 @@ def _load_boxes(scan_dir: Path) -> dict[str, BoundingBox]:
 def _run_pipeline(scan: ScanResult) -> None:
     """Full deterministic pipeline. Runs in the route's worker thread, so
     asyncio.run() can drive the async probe safely."""
-    events = _EVENT_STORE[scan.scan_id]
     scan_dir = _scan_dir(scan.scan_id)
     scan_dir.mkdir(parents=True, exist_ok=True)
 
     # ── Step 1: dual-persona probe ─────────────────────────────────────────
-    events.append(_event(scan.scan_id, "probe.capture", "running", "Launching dual-persona probe"))
+    _event(scan.scan_id, "probe.capture", "running", "Launching dual-persona probe")
     t0 = time.perf_counter()
     try:
         a, b = asyncio.run(
             capture_both_personas(scan.target_url, scan.scan_id, scan_dir)
         )
         scan.persona_a, scan.persona_b = a, b
-        events.append(
-            _event(
-                scan.scan_id,
-                "probe.capture",
-                "done",
-                f"A+B captured @1280x800 · {len(a.detected_items)}v{len(b.detected_items)} items",
-                (time.perf_counter() - t0) * 1000,
-            )
+        _event(
+            scan.scan_id,
+            "probe.capture",
+            "done",
+            f"A+B captured @1280x800 · {len(a.detected_items)}v{len(b.detected_items)} items",
+            (time.perf_counter() - t0) * 1000,
         )
         html_a = (scan_dir / "persona_a.html").read_text(errors="replace")
         boxes = _load_boxes(scan_dir)
     except Exception as e:  # probe failure must never 500 the scan
-        events.append(
-            _event(scan.scan_id, "probe.capture", "error", f"probe failed: {e}",
-                   (time.perf_counter() - t0) * 1000)
-        )
+        _event(scan.scan_id, "probe.capture", "error", f"probe failed: {e}",
+               (time.perf_counter() - t0) * 1000)
         html_a = _fetch_page(scan.target_url)
         boxes = {}
         if html_a is None:
@@ -118,15 +123,13 @@ def _run_pipeline(scan: ScanResult) -> None:
     # ── Step 2: injection scan on Persona A's page ─────────────────────────
     t0 = time.perf_counter()
     scan.injections = injection_scanner.scan_html(html_a, boxes)
-    events.append(
-        _event(
-            scan.scan_id,
-            "injection.scan",
-            "alert" if scan.injections else "done",
-            f"{len(scan.injections)} hidden payloads across "
-            f"{len({f.channel for f in scan.injections})} channels",
-            (time.perf_counter() - t0) * 1000,
-        )
+    _event(
+        scan.scan_id,
+        "injection.scan",
+        "alert" if scan.injections else "done",
+        f"{len(scan.injections)} hidden payloads across "
+        f"{len({f.channel for f in scan.injections})} channels",
+        (time.perf_counter() - t0) * 1000,
     )
 
     # ── Step 3: divergence diff + reality gap ──────────────────────────────
@@ -136,15 +139,13 @@ def _run_pipeline(scan: ScanResult) -> None:
         )
         scan.reality_gap_score = diff_engine.reality_gap_score(scan.divergence)
         d = scan.divergence
-        events.append(
-            _event(
-                scan.scan_id,
-                "diff.compute",
-                "alert" if (d.checkout_swapped or d.descriptor_swapped) else "done",
-                f"gap {scan.reality_gap_score}/100 · checkout_swapped={d.checkout_swapped} · "
-                f"pixels {d.pixel_divergence_pct}% · jaccard {d.text_jaccard_distance}",
-                d.compute_ms,
-            )
+        _event(
+            scan.scan_id,
+            "diff.compute",
+            "alert" if (d.checkout_swapped or d.descriptor_swapped) else "done",
+            f"gap {scan.reality_gap_score}/100 · checkout_swapped={d.checkout_swapped} · "
+            f"pixels {d.pixel_divergence_pct}% · jaccard {d.text_jaccard_distance}",
+            d.compute_ms,
         )
 
     # ── Step 4: OSINT enrich (live keys -> live, else cached fixtures) ──────
@@ -152,18 +153,16 @@ def _run_pipeline(scan: ScanResult) -> None:
     merchant = urlparse(scan.target_url).hostname or scan.target_url
     try:
         scan.osint = osint_client.enrich(merchant)
-        events.append(
-            _event(
-                scan.scan_id,
-                "osint.enrich",
-                "done",
-                f"{scan.osint.source_mode} · {len(scan.osint.adverse_media_hits)} media hits",
-                (time.perf_counter() - t0) * 1000,
-            )
+        _event(
+            scan.scan_id,
+            "osint.enrich",
+            "done",
+            f"{scan.osint.source_mode} · {len(scan.osint.adverse_media_hits)} media hits",
+            (time.perf_counter() - t0) * 1000,
         )
     except Exception as e:
-        events.append(_event(scan.scan_id, "osint.enrich", "error", str(e),
-                             (time.perf_counter() - t0) * 1000))
+        _event(scan.scan_id, "osint.enrich", "error", str(e),
+               (time.perf_counter() - t0) * 1000)
 
     # ── Step 5: verdict (precedence: cloaked > injection > drift > clean) ──
     d = scan.divergence
@@ -173,13 +172,11 @@ def _run_pipeline(scan: ScanResult) -> None:
         scan.verdict = Verdict.INJECTION_DETECTED
     else:
         scan.verdict = Verdict.VERIFIED_CLEAN
-    events.append(
-        _event(
-            scan.scan_id,
-            "verdict",
-            "alert" if scan.verdict != Verdict.VERIFIED_CLEAN else "done",
-            scan.verdict.value,
-        )
+    _event(
+        scan.scan_id,
+        "verdict",
+        "alert" if scan.verdict != Verdict.VERIFIED_CLEAN else "done",
+        scan.verdict.value,
     )
 
     # ── Step 6: evidence manifest + merkle hash + persistence ──────────────
@@ -205,12 +202,18 @@ def create_scan(req: ScanRequest) -> ScanResult:
         evidence_merkle_hash="",
     )
     _SCAN_STORE[scan.scan_id] = scan
-    _EVENT_STORE[scan.scan_id] = [
-        _event(scan.scan_id, "scan.created", "done", f"Scan queued for {req.url}"),
-    ]
+    _event(scan.scan_id, "scan.created", "done", f"Scan queued for {req.url}")
     _run_pipeline(scan)
     _SCAN_STORE[scan.scan_id] = scan
     return scan
+
+
+@router.get("/scans", response_model=list[ScanResult])
+def list_scans(limit: int = 50) -> list[ScanResult]:
+    """Recent scans, newest first — in-process plus persisted."""
+    seen: dict[str, ScanResult] = {s.scan_id: s for s in store.list_scans(limit)}
+    seen.update(_SCAN_STORE)  # in-process wins (includes in-flight scans)
+    return sorted(seen.values(), key=lambda s: s.created_at, reverse=True)[:limit]
 
 
 @router.get("/scans/{scan_id}", response_model=ScanResult)
@@ -221,20 +224,50 @@ def get_scan(scan_id: str) -> ScanResult:
     return scan
 
 
+_TERMINAL_STEPS = {"verdict", "pipeline.error"}
+
+
+def _all_events(scan_id: str) -> list[AgentEvent]:
+    """In-process + persisted events, deduped by id, ordered by timestamp.
+
+    Both sources can be partial: in-process misses events emitted before a
+    restart; persisted can lag an in-flight insert. Union covers both.
+    """
+    merged: dict[str, AgentEvent] = {
+        e.id: e for e in store.list_events(scan_id)
+    }
+    merged.update({e.id: e for e in _EVENT_STORE.get(scan_id, [])})
+    return sorted(merged.values(), key=lambda e: e.timestamp)
+
+
 @router.get("/scans/{scan_id}/stream")
 async def stream_scan(scan_id: str) -> StreamingResponse:
     """SSE stream of AgentEvents for a scan.
 
-    TODO(T6): back with the live async event bus; replay persisted events for
-    late subscribers, then tail until terminal status.
+    Replays stored events with a short pacing delay (reads like a live feed),
+    then tails the store until a terminal step or a 90s cap — live-capable
+    for when T6 switches the pipeline to a background task. Until then, the
+    sync pipeline has already finished by the time a client can connect, so
+    this is effectively a paced replay.
     """
-    events = _EVENT_STORE.get(scan_id) or store.list_events(scan_id)
-    if scan_id not in _SCAN_STORE and not events:
+    if scan_id not in _SCAN_STORE and not _all_events(scan_id):
         raise HTTPException(status_code=404, detail="scan not found")
 
     async def gen() -> AsyncIterator[str]:
-        for ev in events:
-            yield f"data: {json.dumps(ev.model_dump(mode='json'))}\n\n"
+        sent: set[str] = set()
+        deadline = time.monotonic() + 90.0
+        while True:
+            events = _all_events(scan_id)
+            fresh = [e for e in events if e.id not in sent]
+            terminal_seen = False
+            for ev in fresh:
+                sent.add(ev.id)
+                yield f"data: {json.dumps(ev.model_dump(mode='json'))}\n\n"
+                terminal_seen = terminal_seen or ev.step in _TERMINAL_STEPS
+                await asyncio.sleep(0.25)  # pacing — replay reads like live
+            if terminal_seen or time.monotonic() > deadline:
+                break
+            await asyncio.sleep(0.2)  # tail poll
         yield 'data: {"terminal": true}\n\n'
 
     return StreamingResponse(gen(), media_type="text/event-stream")

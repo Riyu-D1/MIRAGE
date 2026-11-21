@@ -14,9 +14,10 @@ After **every** ticket: `pytest tests/` (repo root) **and** `npm run build` (in
 | T2 | ✅ DONE — `core/playwright_probe.py` parallel dual-persona capture @1280×800 + boxes json |
 | T3 | ✅ DONE — `core/diff_engine.py` 3-channel diff + neon heatmap + reality_gap_score |
 | T4 | ✅ DONE — `core/injection_scanner.py` finds exactly 6 findings on `:8001/`, 0 on `/control` |
-| T5 | 🔶 PARTIAL — `check_drift` + sleeper routes + `replay_engine` (0-LLM, EXACT_MATCH) live; dossier HTML + sleeper_monitors persistence still TODO |
-| T6 | 🔶 PARTIAL — full pipeline + SQLite persistence live in `routes/scans.py` + `EvidenceStore`; remaining: Supabase path (TODO branches marked), live async SSE bus, webhook dispatch |
-| T7–T10 | ⬜ TODO — execute per spec below |
+| T5 | 🔶 PARTIAL — `check_drift` + routes + `sleeper_monitors` persistence + `replay_engine` + HTML dossier all live; remaining: scheduled Routine wiring, `screenshot_url` on checks |
+| T6 | 🔶 PARTIAL — pipeline + EvidenceStore (SQLite **and** Supabase paths), `GET /scans` list, `GET /sleeper/monitors`, webhook dispatch + inbound event injection all live; remaining: async background pipeline (SSE already tails live — just move `_run_pipeline` to a thread and return PENDING early), Realtime client in web |
+| T7 | 🔶 PARTIAL — MCP tools call backend with light contract validation; remaining: production polish |
+| T8–T10 | ⬜ TODO — execute per spec below |
 
 **Proven live:** scan of `:8001/` → `CLOAKED_CRITICAL`, gap 80, 6 injections,
 checkout+descriptor swaps, heatmap + manifest written; `/control` →

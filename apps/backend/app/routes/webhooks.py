@@ -1,23 +1,42 @@
 """Inbound webhooks — /api/webhooks.
 
-Stub implementation. # TODO(T5/T6): authenticate with GROKBOT_API_KEY and
-route parsed events via integrations/grokbot_client.parse_inbound.
+Grok Bot posts events here (sleeper triggers, covert outreach results).
+When GROKBOT_API_KEY is configured, Bearer auth is enforced; when blank
+(offline mode) the route accepts everything. Parsed events with a scan_id
+are injected into that scan's AgentEvent stream so they surface in the
+Mission Control feed.
 """
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
+
+from ..config import settings
+from ..integrations import grokbot_client
+from .scans import _all_events, _event
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
 
 @router.post("/grokbot")
 async def grokbot_webhook(request: Request) -> dict:
-    """Receive Grok Bot events (sleeper triggers, covert outreach results).
+    """Receive Grok Bot events and surface them in the scan's mission feed."""
+    if settings.grokbot_api_key:
+        auth = request.headers.get("Authorization", "")
+        if auth != f"Bearer {settings.grokbot_api_key}":
+            raise HTTPException(status_code=401, detail="bad webhook key")
 
-    TODO(T6): verify Authorization: Bearer {GROKBOT_API_KEY} when configured,
-    then dispatch on integrations.grokbot_client.parse_inbound(payload).
-    """
     payload = await request.json()
-    return {
-        "received": True,
-        "event_type": payload.get("type", "unknown"),
-        "note": "stub — inbound event handling implemented in T6",
-    }
+    parsed = grokbot_client.parse_inbound(payload)
+
+    scan_id = parsed.get("scan_id")
+    injected = False
+    if scan_id and _all_events(scan_id):
+        _event(
+            scan_id,
+            f"grokbot.{parsed['type']}",
+            "alert",
+            f"Grok Bot: {parsed['type']} — "
+            f"{str(payload.get('detail') or payload.get('message') or 'received')[:120]}",
+            agent="grok-bot",
+        )
+        injected = True
+
+    return {"received": True, "event_type": parsed["type"], "injected": injected}

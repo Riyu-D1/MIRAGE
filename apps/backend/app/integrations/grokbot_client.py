@@ -28,6 +28,22 @@ async def dispatch_event(event: AgentEvent) -> bool:
         return False
 
 
+def dispatch_event_sync(event: AgentEvent) -> bool:
+    """Sync variant for the pipeline's worker thread — fire-and-forget."""
+    if not settings.grokbot_enabled:
+        return False
+    try:
+        resp = httpx.post(
+            settings.grokbot_webhook_url,
+            json=event.model_dump(mode="json"),
+            headers={"Authorization": f"Bearer {settings.grokbot_api_key}"},
+            timeout=3.0,
+        )
+        return resp.is_success
+    except httpx.HTTPError:
+        return False
+
+
 def parse_inbound(payload: dict[str, Any]) -> dict[str, Any]:
     """Normalize an inbound Grok Bot webhook payload.
 
