@@ -1,11 +1,16 @@
 """Scan routes — /api/scans.
 
-The deterministic pipeline is live:
+The deterministic pipeline is live and ASYNC:
+  POST returns PENDING immediately -> pipeline runs in a daemon thread:
   playwright probe (dual persona, 1280x800) -> injection scan -> divergence
-  diff + reality gap -> OSINT enrich -> verdict -> artifact manifest.
-TODO(T6): swap in-process stores for supabase_client/SQLite, run the pipeline
-as a background task (async SSE bus instead of post-hoc event replay), and
-dispatch events to integrations/grokbot_client.
+  diff + reality gap -> OSINT enrich -> verdict -> artifact manifest ->
+  pipeline.complete event.
+Events persist to the EvidenceStore (SQLite or Supabase) and dispatch to the
+Grok Bot webhook; GET /scans/{id}/stream tails them live over SSE. Clients
+refetch GET /scans/{id} when a terminal step arrives (page.tsx does this).
+
+In-process dicts remain for hot reads; the store is the source of truth and
+_all_events merges both (covers restart gaps and in-flight writes).
 """
 import asyncio
 import json
@@ -37,7 +42,8 @@ from ..schemas import (
 
 router = APIRouter(tags=["scans"])
 
-# In-process store — replaced by supabase_client/SQLite in T6.
+# In-process hot store — EvidenceStore (SQLite/Supabase) is the source of
+# truth; these dicts just avoid a DB hit for scans/events in this process.
 _SCAN_STORE: dict[str, ScanResult] = {}
 _EVENT_STORE: dict[str, list[AgentEvent]] = {}
 

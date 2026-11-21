@@ -1,5 +1,8 @@
-"""Sleeper Watch — Day 1 -> Day 60 post-onboarding drift monitor (T5 — core
-check implemented; persistence into sleeper_monitors still TODO(T5))."""
+"""Sleeper Watch — Day 1 -> Day 60 post-onboarding drift monitor (T5 core).
+
+Pure deterministic check: fetch /sleeper?day=N, SHA-256 the HTML, extract
+the x-checkout-endpoint meta, compare to the day-1 baseline. Persistence
+(sleeper_monitors) is handled by the routes layer via EvidenceStore."""
 import hashlib
 import re
 
@@ -36,8 +39,9 @@ def check_drift(
     """Compare a merchant's day-N surface to its day-1 approved baseline.
 
     When baseline values are omitted, day-1 is fetched live and used as the
-    baseline (self-baselining for the demo). TODO(T5): read baselines from the
-    sleeper_monitors table instead; capture screenshot via playwright_probe.
+    baseline (self-baselining for the demo). The routes layer supplies
+    baselines from sleeper_monitors when a monitor is registered.
+    TODO(T5): capture an evidence screenshot via playwright_probe.
     """
     if baseline_hash is None or baseline_gateway is None:
         baseline = _fetch_surface(target_url, 1)

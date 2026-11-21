@@ -76,5 +76,11 @@ offline with SQLite + cached fixtures. Paste keys into `.env` (see `.env.example
 
 ## Status
 
-Starter blueprint: every module compiles, boots, and passes smoke tests; feature
-logic is intentionally stubbed behind `TODO(T#)` tags mapped to `docs/TASKS.md`.
+**Working prototype.** The full deterministic pipeline is live end-to-end:
+async scan (`POST /api/scans` → PENDING → background pipeline → live SSE feed),
+dual-persona capture, 6-channel injection scan, divergence + heatmap, OSINT
+(cached or live), sleeper drift + persistence, 0-LLM replay, printable dossier,
+SQLite or Supabase evidence store. Verified: `pytest` 8/8, `next build` clean,
+cloaked target → `CLOAKED_CRITICAL` (gap 80), control → `VERIFIED_CLEAN`.
+Remaining work is tracked in `docs/TASKS.md` — mostly frontend polish (T8/T9)
+and E2E (T10). **Agents: read `AGENTS.md` → `docs/TASKS.md`.**

@@ -157,9 +157,9 @@ def test_target_stub_routes():
     assert httpx.get(f"{TARGET}/mock-gateway/declared", timeout=5).status_code == 200
 
 
-# ── 5. Stub API routes return valid typed responses (no 500s) ────────────────
+# ── 5. Live API routes return valid typed responses (no 500s) ────────────────
 @requires_backend
-def test_scan_lifecycle_stub():
+def test_scan_lifecycle():
     # POST returns a PENDING scan immediately; the pipeline runs in a
     # background thread. Poll GET until the verdict hardens.
     created = httpx.post(f"{BACKEND}/api/scans", json={"url": "http://localhost:8001/"}, timeout=15)
@@ -202,7 +202,7 @@ def test_scan_lifecycle_stub():
 
 
 @requires_backend
-def test_sleeper_and_webhook_stubs():
+def test_sleeper_and_webhook():
     reg = httpx.post(f"{BACKEND}/api/sleeper/register", json={"target_url": "http://localhost:8001/"}, timeout=5)
     assert reg.status_code == 200
 

@@ -119,7 +119,7 @@ See `docs/ARCHITECTURE.md` for the annotated tree. In short:
 
 - `apps/backend/app/core/` — deterministic forensics modules (probes, diff, injection, sleeper, replay)
 - `apps/backend/app/integrations/` — sponsor client shells (supabase, grokbot, osint)
-- `apps/backend/app/routes/` — REST + SSE route stubs
+- `apps/backend/app/routes/` — REST + live SSE routes (scans/sleeper/webhooks)
 - `apps/web/src/components/` — typed visual component shells (`TODO(T8/T9)`)
 - `supabase/migrations/` — SQL to paste into Supabase SQL Editor at 10:30 AM
 - `grokbot/` — morning activation checklist + Skill/Routine paste-ready templates
@@ -176,3 +176,49 @@ states are already fed by the live SSE feed) → T10 E2E → T5/T6 leftovers
 - Don't call an LLM inside `core/` forensic modules — they are the deterministic core.
 - Don't change the `1280×800` viewport, schema field names, or port assignments.
 - Don't swallow exceptions silently — log with latency + artifact hash context.
+
+## 10. Runtime Contracts Reference (how the pieces actually talk)
+
+**Async scan lifecycle** — `POST /api/scans` → returns `ScanResult(verdict=PENDING)`
+instantly; `_run_pipeline` runs in a daemon thread mutating that same object.
+`GET /api/scans/{id}` always reflects current state; `GET /api/scans/{id}/stream`
+(SSE) emits every `AgentEvent` as it lands (persisted + in-process merged by
+`_all_events`), closes after a **terminal step** + `{"terminal": true}` marker.
+Frontend contract: open the stream right after POST, refetch the scan when a
+terminal step arrives (`page.tsx` does exactly this).
+
+**Pipeline step vocabulary** (`AgentEvent.step`, emitted in order):
+
+| step | status semantics |
+| ---- | ---------------- |
+| `scan.created` | queued |
+| `probe.capture` | `running` then `done`/`error` (fallback: httpx Persona-A fetch; `pipeline.error` aborts) |
+| `injection.scan` | `alert` if findings else `done` |
+| `diff.compute` | `alert` if checkout/descriptor swapped |
+| `osint.enrich` | `done`/`error` (never fatal — fixtures) |
+| `verdict` | `alert` unless `VERIFIED_CLEAN` |
+| `pipeline.complete` | **terminal** — artifacts + merkle sealed |
+| `pipeline.error` | **terminal** — abort |
+| `grokbot.<type>` | injected by `/api/webhooks/grokbot` (agent=`grok-bot`; not re-dispatched outbound — echo-loop guard) |
+
+`status` ∈ `running|done|alert|error`; `agent` = `mirage-backend` or `grok-bot`.
+The MissionRail stepper renders rows in this vocabulary — **reuse these step
+names; don't invent new ones without updating the frontend.**
+
+**Extraction contract (target-merchant ↔ probe — byte-stable, do not change):**
+- `<meta name="x-checkout-endpoint" content="/mock-gateway/...">` → `checkout_endpoint`
+- `<meta name="x-billing-descriptor" content="...">` → `billing_descriptor`
+- `<li data-item="...">` → `detected_items`
+- Persona switch: `?persona=compliance|buyer` query param (test hook; production
+  signal = UA + Referer headers — Chromium strips Referer on navigations, hence
+  the hook for Persona B).
+- Finding→overlay: `InjectionFinding.dom_selector` keyed into
+  `persona_a_boxes.json` for real bounding boxes; zero-bbox = hidden/non-rendered
+  → InjectionOverlay draws a ghost badge.
+
+**Artifact layout** — `artifacts/{scan_id}/`: `persona_a.html` `persona_a.png`
+`persona_a_boxes.json` `persona_b.html` `persona_b.png` `persona_b_boxes.json`
+`heatmap.png` `scan.json` `manifest.json` (SHA-256 of every file → merkle).
+Served at `/artifacts/{scan_id}/...` — `*_url` fields are relative paths;
+`api.ts#artifactUrl` prefixes `NEXT_PUBLIC_API_URL`. SQLite fallback DB:
+`artifacts/mirage.db` (tables mirror `supabase/migrations/001_initial_schema.sql`).

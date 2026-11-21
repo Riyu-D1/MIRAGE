@@ -45,10 +45,10 @@ def dispatch_event_sync(event: AgentEvent) -> bool:
 
 
 def parse_inbound(payload: dict[str, Any]) -> dict[str, Any]:
-    """Normalize an inbound Grok Bot webhook payload.
-
-    TODO(T6): map known event types (sleeper_trigger, outreach_result,
-    routine_heartbeat) onto internal actions; pass through unknown types.
+    """Normalize an inbound Grok Bot webhook payload into {type, scan_id,
+    payload}. The webhooks route injects it into the scan's event feed.
+    TODO(T6): map known types (sleeper_trigger, outreach_result,
+    routine_heartbeat) onto concrete actions (e.g. auto-simulate a check).
     """
     return {
         "type": payload.get("type", "unknown"),

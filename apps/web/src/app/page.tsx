@@ -2,8 +2,9 @@
 
 /**
  * Mission Control — the MIRAGE demo console.
- * Shell wiring: scan submit -> SSE events -> stub panels.
- * TODO(T9): full live pipeline wiring + verdict-driven visual states.
+ * Live wiring: scan submit -> PENDING scan -> live SSE events -> terminal
+ * refetch -> real captures in every panel.
+ * TODO(T9): verdict-driven visual states + polish (see docs/TASKS.md).
  */
 import { useEffect, useState } from "react";
 
