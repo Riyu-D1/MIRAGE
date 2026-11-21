@@ -15,7 +15,7 @@ After **every** ticket: `pytest tests/` (repo root) **and** `npm run build` (in
 | T3 | ✅ DONE — `core/diff_engine.py` 3-channel diff + neon heatmap + reality_gap_score |
 | T4 | ✅ DONE — `core/injection_scanner.py` finds exactly 6 findings on `:8001/`, 0 on `/control` |
 | T5 | 🔶 PARTIAL — `check_drift` + sleeper routes + `replay_engine` (0-LLM, EXACT_MATCH) live; dossier HTML + sleeper_monitors persistence still TODO |
-| T6 | 🔶 PARTIAL — full pipeline live in `routes/scans.py` (probe→scan→diff→OSINT→verdict→manifest); remaining: SQLite/Supabase persistence, live SSE bus, webhook dispatch |
+| T6 | 🔶 PARTIAL — full pipeline + SQLite persistence live in `routes/scans.py` + `EvidenceStore`; remaining: Supabase path (TODO branches marked), live async SSE bus, webhook dispatch |
 | T7–T10 | ⬜ TODO — execute per spec below |
 
 **Proven live:** scan of `:8001/` → `CLOAKED_CRITICAL`, gap 80, 6 injections,

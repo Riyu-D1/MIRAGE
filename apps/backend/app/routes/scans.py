@@ -24,6 +24,7 @@ from ..config import settings
 from ..core import diff_engine, injection_scanner, replay_engine
 from ..core.playwright_probe import DESKTOP_UA, capture_both_personas
 from ..integrations import osint_client
+from ..integrations.supabase_client import store
 from ..schemas import (
     AgentEvent,
     BoundingBox,
@@ -43,7 +44,7 @@ _EVENT_STORE: dict[str, list[AgentEvent]] = {}
 def _event(
     scan_id: str, step: str, status: str, detail: str, latency_ms: float | None = None
 ) -> AgentEvent:
-    return AgentEvent(
+    ev = AgentEvent(
         id=str(uuid.uuid4()),
         scan_id=scan_id,
         timestamp=datetime.now(timezone.utc).isoformat(),
@@ -53,6 +54,8 @@ def _event(
         detail=detail,
         latency_ms=latency_ms,
     )
+    store.insert_event(ev)
+    return ev
 
 
 def _fetch_page(url: str) -> str | None:
@@ -179,10 +182,15 @@ def _run_pipeline(scan: ScanResult) -> None:
         )
     )
 
-    # ── Step 6: evidence manifest + merkle hash ────────────────────────────
+    # ── Step 6: evidence manifest + merkle hash + persistence ──────────────
     (scan_dir / "scan.json").write_text(scan.model_dump_json(indent=2))
     manifest = replay_engine.build_manifest(scan_dir)
     scan.evidence_merkle_hash = diff_engine.merkle_hash(list(manifest.values()))
+    for name, sha in manifest.items():
+        store.record_artifact(
+            scan.scan_id, "artifact", f"/artifacts/{scan.scan_id}/{name}", sha
+        )
+    store.upsert_scan(scan)
 
 
 @router.post("/scans", response_model=ScanResult)
@@ -207,7 +215,7 @@ def create_scan(req: ScanRequest) -> ScanResult:
 
 @router.get("/scans/{scan_id}", response_model=ScanResult)
 def get_scan(scan_id: str) -> ScanResult:
-    scan = _SCAN_STORE.get(scan_id)
+    scan = _SCAN_STORE.get(scan_id) or store.get_scan(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="scan not found")
     return scan
@@ -220,11 +228,12 @@ async def stream_scan(scan_id: str) -> StreamingResponse:
     TODO(T6): back with the live async event bus; replay persisted events for
     late subscribers, then tail until terminal status.
     """
-    if scan_id not in _SCAN_STORE:
+    events = _EVENT_STORE.get(scan_id) or store.list_events(scan_id)
+    if scan_id not in _SCAN_STORE and not events:
         raise HTTPException(status_code=404, detail="scan not found")
 
     async def gen() -> AsyncIterator[str]:
-        for ev in _EVENT_STORE.get(scan_id, []):
+        for ev in events:
             yield f"data: {json.dumps(ev.model_dump(mode='json'))}\n\n"
         yield 'data: {"terminal": true}\n\n'
 
@@ -234,7 +243,7 @@ async def stream_scan(scan_id: str) -> StreamingResponse:
 @router.post("/scans/{scan_id}/replay", response_model=ReplayVerification)
 def replay_scan(scan_id: str) -> ReplayVerification:
     """Zero-LLM deterministic re-verification of stored artifacts."""
-    if scan_id not in _SCAN_STORE:
+    if scan_id not in _SCAN_STORE and store.get_scan(scan_id) is None:
         raise HTTPException(status_code=404, detail="scan not found")
     return replay_engine.replay(scan_id, settings.artifacts_path)
 
@@ -242,7 +251,7 @@ def replay_scan(scan_id: str) -> ReplayVerification:
 @router.get("/scans/{scan_id}/dossier")
 def get_dossier(scan_id: str, format: str = "json") -> dict:
     """Printable evidence dossier (JSON now; HTML rendering in T5)."""
-    scan = _SCAN_STORE.get(scan_id)
+    scan = _SCAN_STORE.get(scan_id) or store.get_scan(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="scan not found")
     # TODO(T5): format=html -> standalone printable HTML dossier with all
