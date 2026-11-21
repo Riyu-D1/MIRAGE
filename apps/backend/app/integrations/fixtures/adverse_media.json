@@ -1,0 +1,20 @@
+{
+  "adverse_media_hits": [
+    {
+      "title": "Aurora Home Goods Ltd linked to laundered vape sales — forum report",
+      "url": "https://example.invalid/aurora-laundering-thread",
+      "snippet": "Buyers report card statements showing 'SHADOWPAY*LTD' instead of the storefront name — classic transaction laundering descriptor swap."
+    },
+    {
+      "title": "Shelton Street address hosts 400+ shell registrations",
+      "url": "https://example.invalid/shelton-shell-density",
+      "snippet": "71 Shelton Street is a known formation-agent address with high shell-company density."
+    }
+  ],
+  "covert_outreach_log": {
+    "sender": "mirage@mail.grokbot.com",
+    "status": "sent",
+    "transcript": "Q: Can you confirm your settlement descriptor? A: 'MERCHANT*SHOP' — mismatched with buyer statements."
+  },
+  "fixture_note": "cached_fallback — replace with live Tavily results (T6)"
+}

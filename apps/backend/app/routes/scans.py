@@ -1,17 +1,23 @@
 """Scan routes — /api/scans.
 
-Stub implementation: endpoints return valid typed responses immediately.
-# TODO(T6): run the T2->T5 forensic pipeline as an async task, persist via
-integrations/supabase_client (SQLite fallback), and stream real AgentEvents.
+Minimal sync pipeline is live so the demo path works end-to-end:
+POST /scans fetches the target HTML as Persona A, runs the deterministic
+injection scanner, and sets the verdict. TODO(T6): replace _run_pipeline_sync
+with the full async pipeline (playwright_probe -> diff_engine -> OSINT ->
+persistence via supabase_client + live SSE event bus).
 """
 import json
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import AsyncIterator
 
+import httpx
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
+from ..core import injection_scanner
+from ..core.playwright_probe import DESKTOP_UA
 from ..schemas import (
     AgentEvent,
     ReplayCheck,
@@ -28,7 +34,9 @@ _SCAN_STORE: dict[str, ScanResult] = {}
 _EVENT_STORE: dict[str, list[AgentEvent]] = {}
 
 
-def _event(scan_id: str, step: str, status: str, detail: str) -> AgentEvent:
+def _event(
+    scan_id: str, step: str, status: str, detail: str, latency_ms: float | None = None
+) -> AgentEvent:
     return AgentEvent(
         id=str(uuid.uuid4()),
         scan_id=scan_id,
@@ -37,18 +45,66 @@ def _event(scan_id: str, step: str, status: str, detail: str) -> AgentEvent:
         agent="mirage-backend",
         status=status,  # type: ignore[arg-type]
         detail=detail,
-        latency_ms=None,
+        latency_ms=latency_ms,
     )
+
+
+def _fetch_page(url: str) -> str | None:
+    """Fetch raw HTML as Persona A (direct desktop compliance reviewer)."""
+    try:
+        resp = httpx.get(url, headers={"User-Agent": DESKTOP_UA}, timeout=10.0)
+        resp.raise_for_status()
+        return resp.text
+    except httpx.HTTPError:
+        return None
+
+
+def _run_pipeline_sync(scan: ScanResult) -> None:
+    """Synchronous starter pipeline (replaced by T6's async probe pipeline).
+
+    Runs the deterministic injection scan only — persona captures, divergence,
+    heatmap, and OSINT enrichment land in T2/T3/T6.
+    """
+    events = _EVENT_STORE[scan.scan_id]
+    events.append(_event(scan.scan_id, "scan.fetch", "running", f"Fetching {scan.target_url}"))
+    t0 = time.perf_counter()
+    html = _fetch_page(scan.target_url)
+    fetch_ms = (time.perf_counter() - t0) * 1000
+
+    if html is None:
+        events.append(
+            _event(scan.scan_id, "scan.fetch", "error", "target unreachable", fetch_ms)
+        )
+        return
+    events.append(
+        _event(scan.scan_id, "scan.fetch", "done", f"{len(html)} bytes captured", fetch_ms)
+    )
+
+    t0 = time.perf_counter()
+    findings = injection_scanner.scan_html(html)
+    scan_ms = (time.perf_counter() - t0) * 1000
+    scan.injections = findings
+    status = "alert" if findings else "done"
+    events.append(
+        _event(
+            scan.scan_id,
+            "injection.scan",
+            status,
+            f"{len(findings)} hidden payloads across "
+            f"{len({f.channel for f in findings})} channels",
+            scan_ms,
+        )
+    )
+
+    if findings:
+        scan.verdict = Verdict.INJECTION_DETECTED
+    # TODO(T6): verdict precedence once divergence lands —
+    # CLOAKED_CRITICAL > INJECTION_DETECTED > DRIFT_DETECTED > VERIFIED_CLEAN.
 
 
 @router.post("/scans", response_model=ScanResult)
 def create_scan(req: ScanRequest) -> ScanResult:
-    """Create a scan and kick off the forensic pipeline.
-
-    TODO(T6): replace the canned PENDING result with an async task running
-    playwright_probe -> diff_engine -> injection_scanner -> osint, emitting
-    AgentEvents at each step.
-    """
+    """Create a scan and run the starter pipeline synchronously."""
     scan = ScanResult(
         scan_id=str(uuid.uuid4()),
         target_url=req.url,
@@ -61,6 +117,8 @@ def create_scan(req: ScanRequest) -> ScanResult:
     _EVENT_STORE[scan.scan_id] = [
         _event(scan.scan_id, "scan.created", "done", f"Scan queued for {req.url}"),
     ]
+    _run_pipeline_sync(scan)
+    _SCAN_STORE[scan.scan_id] = scan
     return scan
 
 

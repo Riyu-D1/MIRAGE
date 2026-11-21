@@ -6,13 +6,27 @@ Ordered, self-contained tickets for autonomous execution. Read `AGENTS.md` first
 After **every** ticket: `pytest tests/` (repo root) **and** `npm run build` (in
 `apps/web` for frontend tickets). Never start the next ticket on red.
 
+## Status (pre-built by Devin — verify, don't redo)
+
+| Ticket | Status |
+| ------ | ------ |
+| T1 | ✅ DONE — `apps/target-merchant/main.py` serves all pages incl. 6 injections + `?persona=` override |
+| T4 | ✅ DONE — `core/injection_scanner.py` finds exactly 6 findings on `:8001/`, 0 on `/control` |
+| T5 | 🔶 PARTIAL — `check_drift` + `/api/sleeper/{register,simulate}` work in-memory; replay/dossier still TODO |
+| T6 | 🔶 PARTIAL — sync injection pipeline live in `routes/scans.py`; full async probe pipeline + SSE bus + persistence still TODO |
+| T2, T3, T7–T10 | ⬜ TODO — execute per spec below |
+
 ---
 
-## T1 — Target Merchant Storefronts `[parallel-safe]`
+## T1 — Target Merchant Storefronts `[parallel-safe]` ✅ DONE (verify only)
 
 **Files:** `apps/target-merchant/main.py`
 
-Implement the self-hosted demo merchant:
+> Implemented. Remaining for agent: verify acceptance bullets below, refine
+> visuals of the two storefronts if demo polish time allows (optional — keep
+> the meta-tag extraction contract and the 6 injection channels byte-stable).
+
+Implemented the self-hosted demo merchant:
 
 - `GET /` — persona-aware storefront. **Persona B** (mobile UA + social `Referer`)
   sees the real storefront: true catalog, checkout posting to `/mock-gateway/hidden`,
@@ -87,11 +101,16 @@ yields 0.
 
 ---
 
-## T4 — 6-Channel Prompt-Injection Scanner `[parallel-safe w/ T3]`
+## T4 — 6-Channel Prompt-Injection Scanner `[parallel-safe w/ T3]` ✅ DONE (verify only)
 
 **Files:** `apps/backend/app/core/injection_scanner.py`
 
-Implement `def scan_html(html: str, boxes: dict) -> list[InjectionFinding]`:
+> Implemented: trigger matching, severity rules, deterministic ids/selectors,
+> zero-bbox convention for non-rendered nodes. Remaining: supply real
+> `selector_boxes` from the T2 probe so invisible-but-rendered elements get
+> true bounding boxes.
+
+Implemented `def scan_html(html: str, boxes: dict) -> list[InjectionFinding]`:
 
 - BeautifulSoup/lxml pass over each channel: `meta_tag`, `html_comment`,
   `css_display_none`, `css_invisible_text` (color ≈ background / font-size 0 /
@@ -110,10 +129,14 @@ Implement `def scan_html(html: str, boxes: dict) -> list[InjectionFinding]`:
 
 ---
 
-## T5 — Sleeper Watch & Zero-LLM Regulator Replay `[parallel-safe]`
+## T5 — Sleeper Watch & Zero-LLM Regulator Replay `[parallel-safe]` 🔶 PARTIAL
 
 **Files:** `apps/backend/app/core/sleeper_watch.py`, `core/replay_engine.py`,
 route wiring in `routes/scans.py` (`/replay`, `/dossier`), `routes/sleeper.py`
+
+> `check_drift` + both sleeper routes are live (in-memory baselines).
+> Remaining: `replay_engine.replay`, `sleeper_monitors` persistence,
+> dossier HTML, probe screenshot for `screenshot_url`.
 
 - `sleeper_watch.check_drift(target_url, day, baseline) -> SleeperCheckResult`:
   fetch `/sleeper?day=N` (or replay stored captures), hash HTML, compare to

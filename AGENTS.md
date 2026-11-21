@@ -126,7 +126,27 @@ See `docs/ARCHITECTURE.md` for the annotated tree. In short:
 - `tests/test_smoke.py` — smoke suite; keep it green
 - `scripts/` — `setup.ps1`/`dev.ps1` (Windows) and `setup.sh`/`dev.sh` (macOS/Linux)
 
-## 7. How to Start Building (Saturday 11:00 AM)
+## 7. Implementation Status (pre-built — verify, don't redo)
+
+Already working (see `docs/TASKS.md` status table):
+
+- **T1 done** — target merchant serves all pages: cloaked-vs-real persona split
+  (`?persona=buyer|compliance` override for manual testing), `/control`,
+  `/sleeper?day=N`, mock gateways. Extraction contract: `x-checkout-endpoint`,
+  `x-billing-descriptor` metas + `li[data-item]` catalog — **keep byte-stable**.
+- **T4 done** — `injection_scanner.scan_html` → exactly 6 findings on `:8001/`,
+  0 on `/control`.
+- **T5 partial** — `sleeper_watch.check_drift` + `/api/sleeper/{register,simulate}`
+  work in-memory. Replay/dossier still stubs.
+- **T6 partial** — `POST /api/scans` runs a sync fetch+injection pipeline and
+  emits SSE events. Still needs: playwright probe integration, diff engine,
+  persistence (SQLite/Supabase), OSINT wiring (fixture fallback already works
+  via `integrations/osint_client.enrich`).
+
+**Next tickets for the agent: T2 (playwright probe) → T3 (diff engine) →
+finish T5/T6 → T7 (MCP) → T8/T9 (frontend) → T10.**
+
+## 8. How to Start Building (Saturday 11:00 AM)
 
 1. Run `scripts/setup.ps1` (Windows) or `scripts/setup.sh` (macOS/Linux) if not already done.
 2. Run `scripts/dev.ps1` / `scripts/dev.sh` — verify all four health endpoints respond.
@@ -140,7 +160,7 @@ See `docs/ARCHITECTURE.md` for the annotated tree. In short:
    contract with the rest of the system. Fill in bodies; don't redesign interfaces.
 6. Honor every `# TODO(T#)` tag — it maps 1:1 to a ticket in `docs/TASKS.md`.
 
-## 8. Hard Don'ts
+## 9. Hard Don'ts
 
 - Don't commit `.env`, `node_modules/`, `.venv/`, `artifacts/` output, or secrets.
 - Don't add dependencies without pinning versions in `requirements.txt` / `package.json`.

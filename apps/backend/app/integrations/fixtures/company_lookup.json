@@ -1,0 +1,10 @@
+{
+  "company_name": "AURORA HOME GOODS LTD",
+  "company_number": "09876543",
+  "address_shell_density": 0.83,
+  "registered_address": "71 Shelton Street, Covent Garden, London, WC2H 9JQ",
+  "company_status": "active",
+  "incorporated_on": "2024-11-02",
+  "sic_codes": ["47910"],
+  "fixture_note": "cached_fallback — replace with live Companies House data (T6)"
+}

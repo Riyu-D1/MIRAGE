@@ -162,7 +162,11 @@ def test_scan_lifecycle_stub():
     created = httpx.post(f"{BACKEND}/api/scans", json={"url": "http://localhost:8001/"}, timeout=5)
     assert created.status_code == 200
     scan = schemas.ScanResult.model_validate(created.json())
-    assert scan.verdict == schemas.Verdict.PENDING
+    # T4 acceptance: the cloaked target yields exactly 6 injection findings
+    # covering all 6 channels (verdict hardens to CLOAKED_CRITICAL in T6).
+    assert scan.verdict in (schemas.Verdict.INJECTION_DETECTED, schemas.Verdict.CLOAKED_CRITICAL)
+    channels = {f.channel for f in scan.injections}
+    assert channels == set(schemas.InjectionChannel)
 
     got = httpx.get(f"{BACKEND}/api/scans/{scan.scan_id}", timeout=5)
     assert got.status_code == 200

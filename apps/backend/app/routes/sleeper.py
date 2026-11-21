@@ -1,10 +1,13 @@
 """Sleeper Watch routes — /api/sleeper.
 
-Stub implementation. # TODO(T5): wire core/sleeper_watch for real hash-drift
-checks; Grok Bot Routine triggers these via the MCP server (T7).
+/simulate is live (core/sleeper_watch.check_drift). /register captures a
+day-1 baseline in-process; durable persistence into sleeper_monitors is
+TODO(T5/T6).
 """
-from fastapi import APIRouter
+import httpx
+from fastapi import APIRouter, HTTPException
 
+from ..core import sleeper_watch
 from ..schemas import (
     SleeperCheckResult,
     SleeperRegisterRequest,
@@ -13,36 +16,40 @@ from ..schemas import (
 
 router = APIRouter(prefix="/sleeper", tags=["sleeper"])
 
+# In-process baselines — replaced by sleeper_monitors table in T5/T6.
+_BASELINES: dict[str, tuple[str, str]] = {}
+
 
 @router.post("/register")
 def register_sleeper(req: SleeperRegisterRequest) -> dict:
-    """Register a freshly-approved merchant for Day 1->60 drift monitoring.
-
-    TODO(T5): capture baseline DOM/checkout hashes into sleeper_monitors and
-    hand the schedule to the Grok Bot Routine (see grokbot/ROUTINE.template.md).
-    """
+    """Capture a day-1 baseline hash + gateway for drift monitoring."""
+    try:
+        baseline = sleeper_watch._fetch_surface(req.target_url, 1)
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"baseline fetch failed: {e}")
+    baseline_hash = sleeper_watch._hash(baseline)
+    baseline_gateway = sleeper_watch._gateway(baseline)
+    _BASELINES[req.target_url] = (baseline_hash, baseline_gateway)
+    # TODO(T5/T6): persist into sleeper_monitors + hand schedule to the
+    # Grok Bot Routine (grokbot/ROUTINE.template.md).
     return {
         "registered": True,
         "target_url": req.target_url,
-        "note": "stub — baseline capture + persistence implemented in T5",
+        "baseline_hash": baseline_hash,
+        "baseline_gateway": baseline_gateway,
     }
 
 
 @router.post("/simulate", response_model=SleeperCheckResult)
 def simulate_sleeper(req: SleeperSimulateRequest) -> SleeperCheckResult:
-    """Simulate a sleeper-watch check at a given day.
-
-    TODO(T5): call core/sleeper_watch.check_drift() against
-    target-merchant /sleeper?day=N (or stored captures).
-    """
-    return SleeperCheckResult(
-        target_url=req.target_url,
-        day=req.day,
-        intact=True,
-        baseline_hash="0" * 64,
-        current_hash="0" * 64,
-        baseline_gateway="",
-        current_gateway="",
-        alert_triggered=False,
-        screenshot_url=None,
-    )
+    """Run a sleeper drift check at day N."""
+    baseline = _BASELINES.get(req.target_url)
+    try:
+        return sleeper_watch.check_drift(
+            req.target_url,
+            req.day,
+            baseline_hash=baseline[0] if baseline else None,
+            baseline_gateway=baseline[1] if baseline else None,
+        )
+    except httpx.HTTPError as e:
+        raise HTTPException(status_code=502, detail=f"sleeper fetch failed: {e}")
