@@ -13,7 +13,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
+from typing import Any, AsyncIterator
 from urllib.parse import urlparse
 
 import httpx
@@ -248,18 +248,79 @@ def replay_scan(scan_id: str) -> ReplayVerification:
     return replay_engine.replay(scan_id, settings.artifacts_path)
 
 
+def _dossier_html(scan: ScanResult, replay: ReplayVerification, events: list[AgentEvent]) -> str:
+    """Standalone printable evidence dossier — all hashes, captures,
+    findings, verdict, and replay result. Self-contained (inline styles)."""
+    import html as h
+
+    def esc(s: object) -> str:
+        return h.escape(str(s if s is not None else "—"))
+
+    inj_rows = "".join(
+        f"<tr><td>{esc(f.channel.value)}</td><td class='sev'>{f.severity}</td>"
+        f"<td><code>{esc(f.raw_payload)[:140]}</code></td><td>{esc(f.dom_selector)}</td></tr>"
+        for f in scan.injections
+    )
+    ev_rows = "".join(
+        f"<tr><td><code>{esc(e.step)}</code></td><td>{esc(e.status)}</td>"
+        f"<td>{esc(e.detail)}</td><td>{'-' if e.latency_ms is None else f'{e.latency_ms:.1f}ms'}</td></tr>"
+        for e in events
+    )
+    chk_rows = "".join(
+        f"<tr><td>{'PASS' if c.passed else 'FAIL'}</td><td>{esc(c.name)}</td><td>{esc(c.detail)}</td></tr>"
+        for c in replay.checks
+    )
+    d = scan.divergence
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<title>MIRAGE Evidence Dossier — {esc(scan.scan_id)}</title>
+<style>
+  body{{font-family:ui-monospace,Menlo,monospace;background:#0d0f16;color:#edeff5;padding:32px;max-width:960px;margin:auto}}
+  h1{{color:#37e0d8;font-size:22px}} h2{{color:#9aa3b8;font-size:13px;text-transform:uppercase;letter-spacing:.1em;margin-top:28px}}
+  table{{border-collapse:collapse;width:100%;font-size:12px}} td,th{{border:1px solid #232a3d;padding:6px 8px;text-align:left;vertical-align:top}}
+  code{{color:#37e0d8;word-break:break-all}} .sev{{color:#ff3b5c;font-weight:bold}} .verdict{{font-size:20px;font-weight:bold;color:#ff3b5c}}
+  .ok{{color:#2fd67a}} .box{{border:1px solid #232a3d;padding:12px 16px;border-radius:8px;background:#141824}}
+  @media print{{body{{background:#fff;color:#111}} code{{color:#064}} }}
+</style></head><body>
+<h1>MIRAGE EVIDENCE DOSSIER</h1>
+<div class="box">
+  <p>scan_id: <code>{esc(scan.scan_id)}</code></p>
+  <p>target: <code>{esc(scan.target_url)}</code> · captured: {esc(scan.created_at)}</p>
+  <p class="verdict">VERDICT: {esc(scan.verdict.value)} · reality-gap {scan.reality_gap_score}/100</p>
+  <p>evidence merkle: <code>{esc(scan.evidence_merkle_hash)}</code></p>
+</div>
+<h2>Dual-Persona Captures</h2>
+<table><tr><th>persona</th><th>gateway</th><th>descriptor</th><th>html sha256</th><th>items</th></tr>
+{"".join(f"<tr><td>{esc(p.persona if p else '')}</td><td><code>{esc(p.checkout_endpoint if p else None)}</code></td><td>{esc(p.billing_descriptor if p else None)}</td><td><code>{esc((p.html_sha256 or '')[:20])}…</code></td><td>{esc(', '.join(p.detected_items) if p else '')}</td></tr>" for p in (scan.persona_a, scan.persona_b))}
+</table>
+<h2>Divergence</h2>
+<table><tr><th>checkout_swapped</th><th>descriptor_swapped</th><th>pixel %</th><th>jaccard</th><th>compute_ms</th></tr>
+<tr><td>{esc(d.checkout_swapped if d else None)}</td><td>{esc(d.descriptor_swapped if d else None)}</td><td>{esc(d.pixel_divergence_pct if d else None)}</td><td>{esc(d.text_jaccard_distance if d else None)}</td><td>{esc(d.compute_ms if d else None)}</td></tr></table>
+<h2>Prompt-Injection Findings ({len(scan.injections)})</h2>
+<table><tr><th>channel</th><th>severity</th><th>payload</th><th>selector</th></tr>{inj_rows}</table>
+<h2>Mission Log</h2>
+<table><tr><th>step</th><th>status</th><th>detail</th><th>latency</th></tr>{ev_rows}</table>
+<h2>Regulator Replay — {replay.llm_calls} LLM calls · {replay.elapsed_ms:.1f}ms · <span class="ok">{esc(replay.hash_integrity)}</span></h2>
+<table><tr><th>check</th><th>name</th><th>detail</th></tr>{chk_rows}</table>
+<p style="color:#9aa3b8;font-size:11px;margin-top:24px">Generated deterministically by MIRAGE — 0 LLM calls in every forensic check.</p>
+</body></html>"""
+
+
 @router.get("/scans/{scan_id}/dossier")
-def get_dossier(scan_id: str, format: str = "json") -> dict:
-    """Printable evidence dossier (JSON now; HTML rendering in T5)."""
+def get_dossier(scan_id: str, format: str = "json") -> Any:
+    """Evidence dossier — JSON or standalone printable HTML (?format=html)."""
     scan = _SCAN_STORE.get(scan_id) or store.get_scan(scan_id)
     if scan is None:
         raise HTTPException(status_code=404, detail="scan not found")
-    # TODO(T5): format=html -> standalone printable HTML dossier with all
-    # artifact hashes, captures, findings, verdict, and replay result.
+    replay = replay_engine.replay(scan_id, settings.artifacts_path)
+    events = _EVENT_STORE.get(scan_id) or store.list_events(scan_id)
+    if format == "html":
+        from fastapi.responses import HTMLResponse
+
+        return HTMLResponse(_dossier_html(scan, replay, events))
     return {
         "scan_id": scan.scan_id,
         "format": format,
         "dossier": scan.model_dump(mode="json"),
-        "events": [e.model_dump(mode="json") for e in _EVENT_STORE.get(scan_id, [])],
-        "replay": replay_engine.replay(scan_id, settings.artifacts_path).model_dump(mode="json"),
+        "events": [e.model_dump(mode="json") for e in events],
+        "replay": replay.model_dump(mode="json"),
     }
