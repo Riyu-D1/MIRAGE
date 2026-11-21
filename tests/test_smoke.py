@@ -6,6 +6,7 @@ started backend (:8000) and target-merchant (:8001). Service tests SKIP
 cleanly when services are unreachable; schema + Playwright tests always run.
 """
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -159,18 +160,29 @@ def test_target_stub_routes():
 # ── 5. Stub API routes return valid typed responses (no 500s) ────────────────
 @requires_backend
 def test_scan_lifecycle_stub():
-    created = httpx.post(f"{BACKEND}/api/scans", json={"url": "http://localhost:8001/"}, timeout=45)
+    # POST returns a PENDING scan immediately; the pipeline runs in a
+    # background thread. Poll GET until the verdict hardens.
+    created = httpx.post(f"{BACKEND}/api/scans", json={"url": "http://localhost:8001/"}, timeout=15)
     assert created.status_code == 200
-    scan = schemas.ScanResult.model_validate(created.json())
+    assert created.json()["verdict"] == "PENDING"
+    scan_id = created.json()["scan_id"]
+
+    scan = None
+    deadline = time.time() + 45
+    while time.time() < deadline:
+        got = httpx.get(f"{BACKEND}/api/scans/{scan_id}", timeout=5)
+        assert got.status_code == 200
+        s = schemas.ScanResult.model_validate(got.json())
+        if s.verdict != schemas.Verdict.PENDING:
+            scan = s
+            break
+        time.sleep(1)
+    assert scan is not None, "pipeline did not finish within 45s"
     # T4 acceptance: the cloaked target yields exactly 6 injection findings
-    # covering all 6 channels (verdict hardens to CLOAKED_CRITICAL in T6).
+    # covering all 6 channels.
     assert scan.verdict in (schemas.Verdict.INJECTION_DETECTED, schemas.Verdict.CLOAKED_CRITICAL)
     channels = {f.channel for f in scan.injections}
     assert channels == set(schemas.InjectionChannel)
-
-    got = httpx.get(f"{BACKEND}/api/scans/{scan.scan_id}", timeout=5)
-    assert got.status_code == 200
-    assert got.json()["scan_id"] == scan.scan_id
 
     replay = httpx.post(f"{BACKEND}/api/scans/{scan.scan_id}/replay", timeout=5)
     assert replay.status_code == 200
@@ -180,9 +192,10 @@ def test_scan_lifecycle_stub():
     dossier = httpx.get(f"{BACKEND}/api/scans/{scan.scan_id}/dossier", timeout=5)
     assert dossier.status_code == 200
 
-    stream = httpx.get(f"{BACKEND}/api/scans/{scan.scan_id}/stream", timeout=5)
+    stream = httpx.get(f"{BACKEND}/api/scans/{scan.scan_id}/stream", timeout=15)
     assert stream.status_code == 200
     assert "text/event-stream" in stream.headers["content-type"]
+    assert "terminal" in stream.text
 
     missing = httpx.get(f"{BACKEND}/api/scans/does-not-exist", timeout=5)
     assert missing.status_code == 404

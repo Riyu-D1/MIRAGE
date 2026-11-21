@@ -9,6 +9,7 @@ dispatch events to integrations/grokbot_client.
 """
 import asyncio
 import json
+import threading
 import time
 import uuid
 from datetime import datetime, timezone
@@ -118,6 +119,8 @@ def _run_pipeline(scan: ScanResult) -> None:
         html_a = _fetch_page(scan.target_url)
         boxes = {}
         if html_a is None:
+            _event(scan.scan_id, "pipeline.error", "error",
+                   "target unreachable — scan aborted")
             return
 
     # ── Step 2: injection scan on Persona A's page ─────────────────────────
@@ -188,11 +191,16 @@ def _run_pipeline(scan: ScanResult) -> None:
             scan.scan_id, "artifact", f"/artifacts/{scan.scan_id}/{name}", sha
         )
     store.upsert_scan(scan)
+    _event(scan.scan_id, "pipeline.complete", "done",
+           f"evidence sealed · merkle {scan.evidence_merkle_hash[:12]}…")
 
 
 @router.post("/scans", response_model=ScanResult)
 def create_scan(req: ScanRequest) -> ScanResult:
-    """Create a scan and run the deterministic pipeline."""
+    """Create a scan and run the deterministic pipeline in a background
+    thread — returns a PENDING ScanResult immediately so the client can
+    open the SSE stream and watch events arrive live. Poll GET /scans/{id}
+    (or refetch on the stream's terminal event) for the final result."""
     scan = ScanResult(
         scan_id=str(uuid.uuid4()),
         target_url=req.url,
@@ -202,9 +210,9 @@ def create_scan(req: ScanRequest) -> ScanResult:
         evidence_merkle_hash="",
     )
     _SCAN_STORE[scan.scan_id] = scan
+    store.upsert_scan(scan)
     _event(scan.scan_id, "scan.created", "done", f"Scan queued for {req.url}")
-    _run_pipeline(scan)
-    _SCAN_STORE[scan.scan_id] = scan
+    threading.Thread(target=_run_pipeline, args=(scan,), daemon=True).start()
     return scan
 
 
@@ -224,7 +232,7 @@ def get_scan(scan_id: str) -> ScanResult:
     return scan
 
 
-_TERMINAL_STEPS = {"verdict", "pipeline.error"}
+_TERMINAL_STEPS = {"pipeline.complete", "pipeline.error"}
 
 
 def _all_events(scan_id: str) -> list[AgentEvent]:
@@ -244,11 +252,10 @@ def _all_events(scan_id: str) -> list[AgentEvent]:
 async def stream_scan(scan_id: str) -> StreamingResponse:
     """SSE stream of AgentEvents for a scan.
 
-    Replays stored events with a short pacing delay (reads like a live feed),
-    then tails the store until a terminal step or a 90s cap — live-capable
-    for when T6 switches the pipeline to a background task. Until then, the
-    sync pipeline has already finished by the time a client can connect, so
-    this is effectively a paced replay.
+    The pipeline runs in a background thread, so this stream is live:
+    stored events replay with a short pacing delay, then the tail poll
+    picks up new events every ~200ms until pipeline.complete / error or a
+    90s cap. Clients should refetch GET /scans/{id} on terminal.
     """
     if scan_id not in _SCAN_STORE and not _all_events(scan_id):
         raise HTTPException(status_code=404, detail="scan not found")

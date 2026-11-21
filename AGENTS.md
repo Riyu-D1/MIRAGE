@@ -133,19 +133,27 @@ Already working end-to-end (see `docs/TASKS.md` status table):
 - **T1–T4 done** — target merchant (persona split, 6 injections, sleeper days,
   mock gateways), Playwright dual-persona probe @1280×800, divergence diff +
   neon heatmap + reality-gap score, 6-channel injection scanner.
-- **T5 partial** — `check_drift` + sleeper routes + `replay_engine` (0-LLM
-  EXACT_MATCH verification) live; dossier HTML + `sleeper_monitors` persistence
-  still TODO.
-- **T6 partial** — `POST /api/scans` runs the FULL deterministic pipeline and
-  writes artifacts + manifest + `scan.json` under `artifacts/{scan_id}/`.
-  Proven: `:8001/` → `CLOAKED_CRITICAL` (gap 80, 6 injections, both swaps);
-  `/control` → `VERIFIED_CLEAN`. Still needs: SQLite/Supabase persistence,
-  live SSE event bus, Grok webhook dispatch, dossier HTML.
+- **T5 mostly done** — `check_drift`, sleeper routes, `sleeper_monitors`
+  persistence (+`GET /api/sleeper/monitors`), `replay_engine` (0-LLM
+  EXACT_MATCH), and the printable HTML dossier (`?format=html`) are all live.
+  Remaining: Routine scheduling, `screenshot_url` on checks.
+- **T6 mostly done** — `POST /api/scans` returns PENDING instantly and runs
+  the pipeline in a background thread; `GET /scans/{id}/stream` is a LIVE SSE
+  feed (paced replay + tail-poll until `pipeline.complete`). Clients refetch
+  the scan on terminal (see page.tsx). EvidenceStore covers SQLite AND
+  Supabase paths (auto-fallback on bad keys); webhook dispatch + inbound
+  `/api/webhooks/grokbot` injection into the event feed both work. Proven:
+  `:8001/` → `CLOAKED_CRITICAL` (gap 80, 6 injections, both swaps);
+  `/control` → `VERIFIED_CLEAN`. Remaining: Realtime client in web.
+- **T7 partial** — all 4 MCP tools call the backend with contract checks and
+  `mirage_scan` polls to completion.
 - **Gotcha:** Chromium strips `Referer` on navigations — Persona B switches via
   the merchant's `?persona=buyer` test hook (documented in playwright_probe.py).
 
-**Next tickets for the agent: finish T6 (persistence + SSE bus + webhooks) →
-T5 dossier → T7 (MCP) → T8/T9 (frontend visuals — the big remaining chunk) → T10.**
+**Next tickets for the agent: T8/T9 frontend visuals — the big remaining
+chunk (gauge animation, X-Ray polish, payment-rail animation, live stepper
+states are already fed by the live SSE feed) → T10 E2E → T5/T6 leftovers
+(Routine scheduling, Realtime).**
 
 ## 8. How to Start Building (Saturday 11:00 AM)
 

@@ -25,13 +25,25 @@ def _require(data: dict, *keys: str) -> dict:
 
 @mcp.tool()
 async def mirage_scan(url: str) -> dict:
-    """Run a MIRAGE dual-persona scan of a merchant URL -> ScanResult."""
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    """Run a MIRAGE dual-persona scan of a merchant URL -> ScanResult.
+
+    POST returns PENDING immediately (pipeline runs in a background thread);
+    polls GET until the verdict hardens or ~55s elapses.
+    """
+    import asyncio
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
         created = (await client.post(f"{BACKEND_URL}/api/scans", json={"url": url})).json()
-        result = await client.get(f"{BACKEND_URL}/api/scans/{created['scan_id']}")
-        result.raise_for_status()
+        scan = {}
+        for _ in range(55):
+            result = await client.get(f"{BACKEND_URL}/api/scans/{created['scan_id']}")
+            result.raise_for_status()
+            scan = result.json()
+            if scan.get("verdict") != "PENDING":
+                break
+            await asyncio.sleep(1.0)
         scan = _require(
-            result.json(),
+            scan,
             "scan_id", "verdict", "reality_gap_score", "injections",
             "persona_a", "persona_b", "divergence",
         )

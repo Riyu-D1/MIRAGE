@@ -18,6 +18,7 @@ import WipeSlider from "@/components/WipeSlider";
 import {
   createScan,
   getHealth,
+  getScan,
   postReplay,
   simulateSleeper,
   useScanStream,
@@ -41,6 +42,17 @@ export default function MissionControl() {
   useEffect(() => {
     getHealth().then(setHealth).catch(() => setHealth(null));
   }, []);
+
+  // POST /api/scans returns PENDING immediately — when the SSE stream hits a
+  // terminal pipeline step, refetch the completed ScanResult for the panels.
+  useEffect(() => {
+    const done = events.some(
+      (e) => e.step === "pipeline.complete" || e.step === "pipeline.error",
+    );
+    if (done && scan?.verdict === "PENDING") {
+      getScan(scan.scan_id).then(setScan).catch(() => undefined);
+    }
+  }, [events, scan]);
 
   const onScan = (url: string) => {
     setReplay(null);
