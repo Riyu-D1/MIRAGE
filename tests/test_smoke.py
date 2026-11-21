@@ -159,7 +159,7 @@ def test_target_stub_routes():
 # ── 5. Stub API routes return valid typed responses (no 500s) ────────────────
 @requires_backend
 def test_scan_lifecycle_stub():
-    created = httpx.post(f"{BACKEND}/api/scans", json={"url": "http://localhost:8001/"}, timeout=5)
+    created = httpx.post(f"{BACKEND}/api/scans", json={"url": "http://localhost:8001/"}, timeout=45)
     assert created.status_code == 200
     scan = schemas.ScanResult.model_validate(created.json())
     # T4 acceptance: the cloaked target yields exactly 6 injection findings

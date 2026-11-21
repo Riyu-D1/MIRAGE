@@ -11,10 +11,18 @@ After **every** ticket: `pytest tests/` (repo root) **and** `npm run build` (in
 | Ticket | Status |
 | ------ | ------ |
 | T1 | ✅ DONE — `apps/target-merchant/main.py` serves all pages incl. 6 injections + `?persona=` override |
+| T2 | ✅ DONE — `core/playwright_probe.py` parallel dual-persona capture @1280×800 + boxes json |
+| T3 | ✅ DONE — `core/diff_engine.py` 3-channel diff + neon heatmap + reality_gap_score |
 | T4 | ✅ DONE — `core/injection_scanner.py` finds exactly 6 findings on `:8001/`, 0 on `/control` |
-| T5 | 🔶 PARTIAL — `check_drift` + `/api/sleeper/{register,simulate}` work in-memory; replay/dossier still TODO |
-| T6 | 🔶 PARTIAL — sync injection pipeline live in `routes/scans.py`; full async probe pipeline + SSE bus + persistence still TODO |
-| T2, T3, T7–T10 | ⬜ TODO — execute per spec below |
+| T5 | 🔶 PARTIAL — `check_drift` + sleeper routes + `replay_engine` (0-LLM, EXACT_MATCH) live; dossier HTML + sleeper_monitors persistence still TODO |
+| T6 | 🔶 PARTIAL — full pipeline live in `routes/scans.py` (probe→scan→diff→OSINT→verdict→manifest); remaining: SQLite/Supabase persistence, live SSE bus, webhook dispatch |
+| T7–T10 | ⬜ TODO — execute per spec below |
+
+**Proven live:** scan of `:8001/` → `CLOAKED_CRITICAL`, gap 80, 6 injections,
+checkout+descriptor swaps, heatmap + manifest written; `/control` →
+`VERIFIED_CLEAN`; `/replay` → `verified=true, llm_calls=0, EXACT_MATCH`.
+Note: Persona B navigation uses the merchant's `?persona=buyer` hook because
+Chromium strips Referer on navigations (documented in playwright_probe.py).
 
 ---
 

@@ -128,23 +128,24 @@ See `docs/ARCHITECTURE.md` for the annotated tree. In short:
 
 ## 7. Implementation Status (pre-built — verify, don't redo)
 
-Already working (see `docs/TASKS.md` status table):
+Already working end-to-end (see `docs/TASKS.md` status table):
 
-- **T1 done** — target merchant serves all pages: cloaked-vs-real persona split
-  (`?persona=buyer|compliance` override for manual testing), `/control`,
-  `/sleeper?day=N`, mock gateways. Extraction contract: `x-checkout-endpoint`,
-  `x-billing-descriptor` metas + `li[data-item]` catalog — **keep byte-stable**.
-- **T4 done** — `injection_scanner.scan_html` → exactly 6 findings on `:8001/`,
-  0 on `/control`.
-- **T5 partial** — `sleeper_watch.check_drift` + `/api/sleeper/{register,simulate}`
-  work in-memory. Replay/dossier still stubs.
-- **T6 partial** — `POST /api/scans` runs a sync fetch+injection pipeline and
-  emits SSE events. Still needs: playwright probe integration, diff engine,
-  persistence (SQLite/Supabase), OSINT wiring (fixture fallback already works
-  via `integrations/osint_client.enrich`).
+- **T1–T4 done** — target merchant (persona split, 6 injections, sleeper days,
+  mock gateways), Playwright dual-persona probe @1280×800, divergence diff +
+  neon heatmap + reality-gap score, 6-channel injection scanner.
+- **T5 partial** — `check_drift` + sleeper routes + `replay_engine` (0-LLM
+  EXACT_MATCH verification) live; dossier HTML + `sleeper_monitors` persistence
+  still TODO.
+- **T6 partial** — `POST /api/scans` runs the FULL deterministic pipeline and
+  writes artifacts + manifest + `scan.json` under `artifacts/{scan_id}/`.
+  Proven: `:8001/` → `CLOAKED_CRITICAL` (gap 80, 6 injections, both swaps);
+  `/control` → `VERIFIED_CLEAN`. Still needs: SQLite/Supabase persistence,
+  live SSE event bus, Grok webhook dispatch, dossier HTML.
+- **Gotcha:** Chromium strips `Referer` on navigations — Persona B switches via
+  the merchant's `?persona=buyer` test hook (documented in playwright_probe.py).
 
-**Next tickets for the agent: T2 (playwright probe) → T3 (diff engine) →
-finish T5/T6 → T7 (MCP) → T8/T9 (frontend) → T10.**
+**Next tickets for the agent: finish T6 (persistence + SSE bus + webhooks) →
+T5 dossier → T7 (MCP) → T8/T9 (frontend visuals — the big remaining chunk) → T10.**
 
 ## 8. How to Start Building (Saturday 11:00 AM)
 
